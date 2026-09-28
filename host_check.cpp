@@ -2,7 +2,9 @@
 
 #include "host_check.hpp"
 
+#ifndef __ZEPHYR__
 #include <unistd.h>
+#endif
 
 #include <boost/range/adaptor/reversed.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -15,8 +17,16 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <thread>
 #include <vector>
+
+#ifdef __ZEPHYR__
+#include <systemd/sd-bus.h>
+
+#include <dbus_broker.h>
+#include <zephyr/kernel.h>
+#else
+#include <thread>
+#endif
 
 namespace phosphor
 {
@@ -167,7 +177,18 @@ bool isHostRunning(size_t id)
 {
     info("Check if host is running");
 
+#ifdef __ZEPHYR__
+    sd_bus* sdbus = nullptr;
+    int rc = connect_to_dbroker(&sdbus);
+    if (rc < 0)
+    {
+        error("Failed to connect to dbroker: {RC}", "RC", rc);
+        return false;
+    }
+    sdbusplus::bus::bus bus(sdbus, std::false_type());
+#else
     auto bus = sdbusplus::bus::new_default();
+#endif
 
     // No need to check if chassis power is not on
     if (!isChassiPowerOn(bus, id))
@@ -192,7 +213,11 @@ bool isHostRunning(size_t id)
             "Introspecting new bus objects for bus id: {ID} sleeping for 1 second.",
             "ID", id);
         // Give mapper a small window to introspect new objects on bus
+#ifdef __ZEPHYR__
+        k_msleep(1000);
+#else
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+#endif
         if (checkFirmwareConditionRunning(bus))
         {
             info("Host is running!");

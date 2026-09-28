@@ -1,0 +1,59 @@
+config OPENBMC_PHOSPHOR_STATE_MANAGER
+    bool "openbmc phosphor state manager"
+    select OPENBMC_SDBUSPLUS
+    select OPENBMC_PHOSPHOR_DBUS_INTERFACES
+    select OPENBMC_PHOSPHOR_LOGGING
+    select OPENBMC_FMT
+    select OPENBMC_CEREAL
+    select CPP_EXCEPTIONS
+    help
+      Enable the phosphor-state-manager daemons (BMC / Host / Chassis /
+      Hypervisor state) on Zephyr.
+
+      NOTE: this is a port of the upstream meson project. Each daemon is
+      compiled as a separate object set but all of them run as Zephyr
+      threads inside the single BMC application; each *_main() entry point
+      connects to the in-process dbus-broker with connect_to_dbroker()
+      instead of sdbusplus::bus::new_default().
+
+if OPENBMC_PHOSPHOR_STATE_MANAGER
+
+config OPENBMC_PHOSPHOR_STATE_MANAGER_BMC
+    bool "BMC state manager (xyz.openbmc_project.State.BMC)"
+    default y
+    help
+      Owns /xyz/openbmc_project/state/bmc0 and exposes CurrentBMCState,
+      RequestedBMCTransition, LastRebootTime and LastRebootCause.
+
+      On Zephyr there is no systemd, so the BMC state is *always* reported
+      as Ready once this daemon has started; the reboot cause cannot be
+      read from a watchdog bootstatus sysfs file and is reported as
+      Unknown (see bmc_state_manager.cpp).
+
+config OPENBMC_PHOSPHOR_STATE_MANAGER_HOST
+    bool "Host state manager (xyz.openbmc_project.State.Host)"
+    default n
+    help
+      Owns /xyz/openbmc_project/state/host0. Requires the ObjectMapper and
+      (for the auto-reboot policy) the settings daemon; without them the
+      daemon still starts but the power-restore policy lookups fail.
+      Still experimental on Zephyr -- enable only when completing the
+      host sub-application.
+
+config OPENBMC_PHOSPHOR_STATE_MANAGER_CHASSIS
+    bool "Chassis state manager (xyz.openbmc_project.State.Chassis)"
+    default n
+    help
+      Owns /xyz/openbmc_project/state/chassis0 and the PowerOnHours
+      counter. Uses an sdeventplus timer for the POH increment.
+      Still experimental on Zephyr -- enable only when completing the
+      chassis sub-application.
+
+config OPENBMC_PHOSPHOR_STATE_MANAGER_HYPERVISOR
+    bool "Hypervisor state manager (xyz.openbmc_project.State.Hypervisor)"
+    default n
+    help
+      Owns /xyz/openbmc_project/state/hypervisor0 and mirrors the host
+      BootProgress property. Still experimental on Zephyr.
+
+endif # OPENBMC_PHOSPHOR_STATE_MANAGER

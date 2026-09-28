@@ -4,7 +4,14 @@
 
 #include <fmt/format.h>
 #include <fmt/printf.h>
+/* gpiod.h is not part of the Zephyr build (CONFIG_OPENBMC_LIBGPIOD is off);
+ * upstream only got getpid() transitively from it, so include <unistd.h>
+ * explicitly for the Zephyr build. */
+#ifndef __ZEPHYR__
 #include <gpiod.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <phosphor-logging/lg2.hpp>
 
@@ -35,6 +42,14 @@ constexpr auto PROPERTY_INTERFACE = "org.freedesktop.DBus.Properties";
 
 void subscribeToSystemdSignals(sdbusplus::bus_t& bus)
 {
+#ifdef __ZEPHYR__
+    /* There is no systemd on Zephyr, so there is nothing to subscribe to
+     * and no JobRemoved/JobNew signals will ever arrive. The state
+     * managers compensate for that by deriving their initial state
+     * directly instead of asking systemd for the active target. */
+    (void)bus;
+    return;
+#else
     auto method = bus.new_method_call(SYSTEMD_SERVICE, SYSTEMD_OBJ_PATH,
                                       SYSTEMD_INTERFACE, "Subscribe");
 
@@ -53,6 +68,7 @@ void subscribeToSystemdSignals(sdbusplus::bus_t& bus)
         throw std::runtime_error("Unable to subscribe to systemd signals");
     }
     return;
+#endif
 }
 
 std::string getService(sdbusplus::bus_t& bus, std::string path,
@@ -142,6 +158,13 @@ void setProperty(sdbusplus::bus_t& bus, const std::string& path,
 
 int getGpioValue(const std::string& gpioName)
 {
+#ifdef __ZEPHYR__
+    /* libgpiod is not part of the Zephyr build (CONFIG_OPENBMC_LIBGPIOD is
+     * off), so named-GPIO lookups are unavailable. Callers treat -1 as
+     * "could not determine", which is what we want here. */
+    (void)gpioName;
+    return -1;
+#else
     int gpioval = -1;
     gpiod_line* line = gpiod_line_find(gpioName.c_str());
 
@@ -162,6 +185,7 @@ int getGpioValue(const std::string& gpioName)
         }
     }
     return gpioval;
+#endif
 }
 
 void createError(

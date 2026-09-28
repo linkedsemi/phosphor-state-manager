@@ -2,7 +2,9 @@
 
 #include "config.h"
 
+#ifndef __ZEPHYR__
 #include "settings.hpp"
+#endif
 #include "utils.hpp"
 #include "xyz/openbmc_project/State/Host/server.hpp"
 
@@ -67,7 +69,14 @@ class Host : public HostInherit
                 sdbusRule::path("/org/freedesktop/systemd1") +
                 sdbusRule::interface("org.freedesktop.systemd1.Manager"),
             [this](sdbusplus::message_t& m) { sysStateChangeJobNew(m); }),
+#ifdef __ZEPHYR__
+        /* No settings daemon on Zephyr, so the AutoReboot/PowerRestore
+         * policy objects are never looked up (their constructor would throw
+         * on the failed mapper call). See isAutoReboot(). */
+        id(id)
+#else
         settings(bus, id), id(id)
+#endif
     {
         // Enable systemd signals
         utils::subscribeToSystemdSignals(bus);
@@ -331,8 +340,10 @@ class Host : public HostInherit
     /** @brief Used to subscribe to dbus systemd JobNew signal **/
     sdbusplus::bus::match_t systemdSignalJobNew;
 
+#ifndef __ZEPHYR__
     // Settings host objects of interest
     settings::HostObjects settings;
+#endif
 
     /** @brief Host id. **/
     const size_t id = 0;

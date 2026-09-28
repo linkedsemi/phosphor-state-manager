@@ -3,9 +3,12 @@
 #include "host_state_manager.hpp"
 
 #include <fmt/format.h>
+#ifndef __ZEPHYR__
 #include <getopt.h>
+#endif
 
 #include <sdbusplus/bus.hpp>
+#include <sdbusplus/server/manager.hpp>
 
 #include <cstdlib>
 #include <exception>
@@ -15,6 +18,60 @@
 constexpr auto LEGACY_HOST_STATE_PERSIST_PATH =
     "/var/lib/phosphor-state-manager/requestedHostTransition";
 
+#ifdef __ZEPHYR__
+#include <systemd/sd-bus.h>
+
+#include <dbus_broker.h>
+#include <phosphor-logging/lg2.hpp>
+#include <zephyr/kernel.h>
+
+/* Defined in app/src/task_def.cpp. */
+extern struct k_sem host_state_ready_sem;
+
+int host_state_main()
+{
+    /* Zephyr: single BMC process, no argv parsing -- always host 0. */
+    const size_t hostId = 0;
+
+    sd_bus* sdbus = nullptr;
+    int rc = connect_to_dbroker(&sdbus);
+    if (rc < 0)
+    {
+        lg2::error("Failed to connect to dbroker: {RC}", "RC", rc);
+        return rc;
+    }
+    sdbusplus::bus::bus bus(sdbus, std::false_type());
+
+    namespace fs = std::filesystem;
+
+    auto hostBusName = std::string{HOST_BUSNAME} + std::to_string(hostId);
+    auto objPathInst = std::string{HOST_OBJPATH} + std::to_string(hostId);
+
+    // Add sdbusplus ObjectManager.
+    sdbusplus::server::manager_t objManager(bus, objPathInst.c_str());
+
+    phosphor::state::manager::Host manager(bus, objPathInst.c_str(), hostId);
+
+    auto dir = fs::path(fmt::format(HOST_STATE_PERSIST_PATH, hostId))
+                   .parent_path();
+    fs::create_directories(dir);
+
+    // For backwards compatibility, request a busname without host id if
+    // input id is 0.
+    if (hostId == 0)
+    {
+        bus.request_name(HOST_BUSNAME);
+    }
+
+    bus.request_name(hostBusName.c_str());
+
+    k_sem_give(&host_state_ready_sem);
+
+    bus.process_loop();
+
+    return 0;
+}
+#else
 int main(int argc, char** argv)
 {
     size_t hostId = 0;
@@ -84,3 +141,4 @@ int main(int argc, char** argv)
     }
     return 0;
 }
+#endif

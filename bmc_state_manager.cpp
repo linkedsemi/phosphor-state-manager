@@ -3,8 +3,22 @@
 #include "utils.hpp"
 #include "xyz/openbmc_project/Common/error.hpp"
 
+#ifndef __ZEPHYR__
 #include <gpiod.h>
 #include <sys/sysinfo.h>
+#else
+#include <zephyr/kernel.h>
+#include <zephyr/sys/reboot.h>
+
+/* <linux/watchdog.h> bootstatus bits; Zephyr has no such header but the
+ * reboot-cause decoder below still switches on them. */
+#ifndef WDIOF_EXTERN1
+#define WDIOF_EXTERN1 0x0004 /* External relay 1 */
+#endif
+#ifndef WDIOF_CARDRESET
+#define WDIOF_CARDRESET 0x0020 /* Card previously reset the CPU */
+#endif
+#endif
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -91,6 +105,21 @@ std::string BMC::getUnitState(const std::string& unitToCheck)
 
 void BMC::discoverInitialState()
 {
+#ifdef __ZEPHYR__
+    /* No systemd targets to inspect -- and asking for them would block for
+     * the sdbusplus default reply timeout because there is no
+     * org.freedesktop.systemd1 service on the bus.
+     *
+     * Upstream only reports Ready once multi-user.target completed, i.e.
+     * after every service is up. The Zephyr counterpart of that moment is
+     * start_all_auto_threads() returning, which bmc_state_main() waits for
+     * after this constructor. Until then report NotReady so clients polling
+     * Redfish /ipmi do not see a usable BMC while the sensors, bmcweb, ...
+     * are still coming up. */
+    info("Setting the BMCState field to BMC_NOTREADY (startup not finished)");
+    this->currentBMCState(BMCState::NotReady);
+    return;
+#else
     // First look to see if the BMC quiesce target is active
     auto currentStateStr = getUnitState(obmcQuiesceTarget);
     if (currentStateStr == activeState)
@@ -114,10 +143,36 @@ void BMC::discoverInitialState()
     }
 
     return;
+#endif
 }
 
 void BMC::executeTransition(const Transition tranReq)
 {
+#ifdef __ZEPHYR__
+    /* No systemd on Zephyr: both Reboot and HardReboot mean "reset the BMC
+     * now". sys_reboot(SYS_REBOOT_COLD) never returns -- the SoC's
+     * sys_arch_reboot() hands the QSPI read window back to bank 0 from RAM
+     * *before* anything can trigger the reset, which is what keeps a
+     * reboot from slot B bootable (see soc_reboot.c). This is the exact
+     * path phosphor-bmc-code-mgt's Activation::rebootBmc() already uses,
+     * so A/B slot switching and this path stay consistent. */
+    info("RequestedBMCTransition received, rebooting BMC now");
+
+    // Put BMC state to NotReady when issuing a BMC reboot and stop
+    // monitoring for state changes.
+    this->currentBMCState(BMCState::NotReady);
+    this->stateSignal.reset();
+
+    // Give the D-Bus reply for the property change, the log lines above and
+    // the in-flight socket traffic a moment to drain, otherwise the console
+    // line is cut in half by the reset (same trick as code-mgt).
+    k_sleep(K_MSEC(500));
+
+    sys_reboot(SYS_REBOOT_COLD);
+
+    /* Not reached. */
+    return;
+#else
     // HardReboot does not shutdown any services and immediately transitions
     // into the reboot process
     if (server::BMC::Transition::HardReboot == tranReq)
@@ -170,6 +225,7 @@ void BMC::executeTransition(const Transition tranReq)
         }
     }
     return;
+#endif
 }
 
 int BMC::bmcStateChange(sdbusplus::message_t& msg)
@@ -247,20 +303,45 @@ BMC::RebootCause BMC::lastRebootCause(RebootCause value)
 uint64_t BMC::lastRebootTime() const
 {
     using namespace std::chrono;
+#ifdef __ZEPHYR__
+    /* No <sys/sysinfo.h> on Zephyr: k_uptime_get() is milliseconds since
+     * boot. */
+    auto uptime = milliseconds(k_uptime_get());
+#else
     struct sysinfo info;
 
     auto rc = sysinfo(&info);
     assert(rc == 0);
 
-    // Since uptime is in seconds, also get the current time in seconds.
-    auto now = time_point_cast<seconds>(system_clock::now());
-    auto rebootTime = now - seconds(info.uptime);
+    // Uptime is in seconds.
+    auto uptime = seconds(info.uptime);
+#endif
+    // Uptime is relative to now, so the boot timestamp is now - uptime.
+    auto now = time_point_cast<milliseconds>(system_clock::now());
+    auto rebootTime = now - duration_cast<milliseconds>(uptime);
 
-    return duration_cast<milliseconds>(rebootTime.time_since_epoch()).count();
+    return rebootTime.time_since_epoch().count();
 }
 
 void BMC::discoverLastRebootCause()
 {
+#ifdef __ZEPHYR__
+    /* There is no usable reset-cause register on this SoC. The generated
+     * header defines a SEC_PMU->PMU_STATUS RST_SRC field group
+     * (reg_sec_pmu_rg.h bits 30..24: POR/BOR/PAD/IWDT/SOFTWARE/CPU), but on
+     * real hardware those bits never become set -- PMU_STATUS reads back
+     * 0x0000000a after a cold boot, i.e. just the live HSI_EN|VREF_OK
+     * status bits, and rst_src stays 0 across a commanded software reboot
+     * too. The manual agrees: it documents no reset-cause register, only a
+     * fatal-error cause one.
+     *
+     * So until a software marker is introduced (e.g. a flag written to the
+     * overlay filesystem before a commanded reboot, cleared again at the
+     * next boot), the only honest answer is Unknown. */
+    info("No reset-cause register on this SoC, reporting Unknown");
+    this->lastRebootCause(RebootCause::Unknown);
+    return;
+#else
     uint64_t bootReason = 0;
     std::ifstream file;
     auto bootstatusPath = "/sys/class/watchdog/watchdog0/bootstatus";
@@ -324,6 +405,7 @@ void BMC::discoverLastRebootCause()
     }
 
     return;
+#endif
 }
 
 } // namespace manager

@@ -3,7 +3,9 @@
 #include "utils.hpp"
 #include "xyz/openbmc_project/State/BMC/server.hpp"
 
+#ifndef __ZEPHYR__
 #include <linux/watchdog.h>
+#endif
 
 #include <sdbusplus/bus.hpp>
 

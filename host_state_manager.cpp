@@ -61,6 +61,24 @@ constexpr auto SYSTEMD_INTERFACE_UNIT = "org.freedesktop.systemd1.Unit";
 
 void Host::determineInitialState()
 {
+#ifdef __ZEPHYR__
+    /* Upstream asks systemd for obmc-host-startmin@0.target and then polls
+     * the HostFirmware condition for five seconds; both end in Off here.
+     * There is no real host on this platform (the CPU sensor is a fake), so
+     * report Running -- that keeps the sensors' PowerState gating and the
+     * "power status" readers coherent with the chassis being On.
+     *
+     * OperatingSystemState is pinned to Inactive: no OS to report, and this
+     * is the property dbus-sensors' POST-status reader consumes.
+     * deserialize() is skipped on purpose -- there is nothing meaningful to
+     * persist about a host that cannot be powered on or off. */
+    info("Initial Host State will be Running (no real host on Zephyr)");
+    server::Host::currentHostState(HostState::Running);
+    server::Host::requestedHostTransition(Transition::On);
+    osstatus::Status::operatingSystemState(
+        osstatus::Status::OSStatus::Inactive);
+    return;
+#endif
     if (stateActive(getTarget(server::Host::HostState::Running)) ||
         isHostRunning(id))
     {
@@ -185,6 +203,15 @@ bool Host::stateActive(const std::string& target)
 
 bool Host::isAutoReboot()
 {
+#ifdef __ZEPHYR__
+    /* The AutoReboot policy lives in the settings daemon, which does not
+     * exist on Zephyr -- and settings.cpp is not linked here at all because
+     * its settings::Objects class collides with phosphor-host-ipmid's copy.
+     * This is only reachable from the systemd JobRemoved handler, which
+     * never fires on Zephyr; return the safe answer instead of making a
+     * D-Bus call that cannot succeed. */
+    return false;
+#else
     using namespace settings;
 
     /* The logic here is to first check the one-time AutoReboot setting.
@@ -264,6 +291,7 @@ bool Host::isAutoReboot()
         error("Error in AutoReboot Get, {ERROR}", "ERROR", e);
         return false;
     }
+#endif
 }
 
 void Host::sysStateChangeJobRemoved(sdbusplus::message_t& msg)

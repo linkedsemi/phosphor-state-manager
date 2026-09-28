@@ -87,6 +87,22 @@ void Chassis::createSystemdTargetTable()
 //        has read property function
 void Chassis::determineInitialState()
 {
+#ifdef __ZEPHYR__
+    /* Upstream discovers the chassis power state from three sources that do
+     * not exist here: systemd targets, the UPS / PSU services behind
+     * determineStatusOfPower(), and the legacy org.openbmc.control.Power
+     * pgood property. Every one of them fails on Zephyr, so control lands on
+     * the "fail" label and the chassis would be reported Off forever.
+     *
+     * There is no power sequencing on this platform either (no
+     * x86-power-control), so the honest steady state is On: that keeps the
+     * sensors' PowerState gating and `ipmitool chassis power status` coherent
+     * with the always-present (fake) CPU. */
+    info("Initial Chassis State will be On (no power control on Zephyr)");
+    server::Chassis::currentPowerState(PowerState::On);
+    server::Chassis::requestedPowerTransition(Transition::On);
+    return;
+#endif
     // Monitor for any properties changed signals on UPower device path
     uPowerPropChangeSignal = std::make_unique<sdbusplus::bus::match_t>(
         bus,
@@ -681,6 +697,21 @@ void Chassis::startPOHCounter()
 {
     auto dir = fs::path(POH_COUNTER_PERSIST_PATH).parent_path();
     fs::create_directories(dir);
+
+#ifdef __ZEPHYR__
+    /* Upstream drives the whole daemon from the sdeventplus loop here: it
+     * attaches the bus to the event and runs event.loop() forever. That does
+     * NOT work on this platform -- the Chassis object ends up registered on
+     * the bus but nothing ever dispatches it, so every query against it
+     * times out (basu's sd-event port is unproven here; the app's own
+     * test_sd_event thread is commented out for the same reason).
+     *
+     * So on Zephyr the daemon runs bus.process_loop() instead, the path every
+     * other daemon uses. The price is that the POH timer never fires and the
+     * counter stays at its restored value. Revisit if/when sd-event is
+     * validated on Zephyr. */
+    return;
+#endif
 
     try
     {

@@ -50,6 +50,11 @@ int chassis_state_main()
         std::string{CHASSIS_BUSNAME} + std::to_string(chassisId);
     auto objPathInst = std::string{CHASSIS_OBJPATH} + std::to_string(chassisId);
 
+    fs::create_directories(
+        fs::path(fmt::format(POH_COUNTER_PERSIST_PATH, chassisId))
+            .parent_path());
+    fs::create_directories(BASE_FILE_DIR);
+
     // Add sdbusplus ObjectManager.
     sdbusplus::server::manager_t objManager(bus, objPathInst.c_str());
 

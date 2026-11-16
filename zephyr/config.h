@@ -2,9 +2,9 @@
  *
  * Mirrors the defaults in meson_options.txt. The only difference is that
  * every filesystem path is remapped from the Linux FHS layout to the
- * Zephyr filesystem layout:
- *   /run/openbmc/...                     -> /overlay/run/openbmc/...
- *   /var/lib/phosphor-state-manager/...  -> /overlay/var/lib/phosphor-state-manager/...
+ * persistent writable data volume:
+ *   /run/openbmc/...                     -> /mnt/run/openbmc/...
+ *   /var/lib/phosphor-state-manager/...  -> /mnt/var/lib/phosphor-state-manager/...
  *
  * The phosphor-state-manager sources include "config.h" unquoted-by-path,
  * so this directory is put on the global include path by zephyr/CMakeLists.txt
@@ -33,13 +33,16 @@
 
 /* ---- persisted state (fmt::format style "{}" placeholders) ---- */
 #define HOST_STATE_PERSIST_PATH \
-    "/overlay/var/lib/phosphor-state-manager/host{}-PersistData"
+    CONFIG_FS_ROOT_MNT "/var/lib/phosphor-state-manager/host{}-PersistData"
 #define POH_COUNTER_PERSIST_PATH \
-    "/overlay/var/lib/phosphor-state-manager/chassis{}-POHCounter"
+    CONFIG_FS_ROOT_MNT \
+        "/var/lib/phosphor-state-manager/chassis{}-POHCounter"
 #define CHASSIS_STATE_CHANGE_PERSIST_PATH \
-    "/overlay/var/lib/phosphor-state-manager/chassis{}-StateChangeTime"
+    CONFIG_FS_ROOT_MNT \
+        "/var/lib/phosphor-state-manager/chassis{}-StateChangeTime"
 #define SCHEDULED_HOST_TRANSITION_PERSIST_PATH \
-    "/overlay/var/lib/phosphor-state-manager/scheduledHostTransition"
+    CONFIG_FS_ROOT_MNT \
+        "/var/lib/phosphor-state-manager/scheduledHostTransition"
 
 /* ---- feature knobs ---- */
 #define BOOT_COUNT_MAX_ALLOWED 3
@@ -55,9 +58,10 @@
 /* ---- runtime state files (Linux keeps them in /run/openbmc) ----
  * These are used with std::snprintf()/fmt::sprintf() so they keep the
  * printf-style "%d" placeholder of the upstream definitions. */
-#define BASE_FILE_DIR "/overlay/run/openbmc/"
-#define CHASSIS_LOST_POWER_FILE "/overlay/run/openbmc/chassis@%d-lost-power"
-#define HOST_RUNNING_FILE "/overlay/run/openbmc/host@%d-on"
-#define CHASSIS_ON_FILE "/overlay/run/openbmc/chassis@%d-on"
+#define BASE_FILE_DIR CONFIG_FS_ROOT_MNT "/run/openbmc/"
+#define CHASSIS_LOST_POWER_FILE \
+    CONFIG_FS_ROOT_MNT "/run/openbmc/chassis@%d-lost-power"
+#define HOST_RUNNING_FILE CONFIG_FS_ROOT_MNT "/run/openbmc/host@%d-on"
+#define CHASSIS_ON_FILE CONFIG_FS_ROOT_MNT "/run/openbmc/chassis@%d-on"
 
 #endif /* PHOSPHOR_STATE_MANAGER_ZEPHYR_CONFIG_H */

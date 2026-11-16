@@ -47,14 +47,14 @@ int host_state_main()
     auto hostBusName = std::string{HOST_BUSNAME} + std::to_string(hostId);
     auto objPathInst = std::string{HOST_OBJPATH} + std::to_string(hostId);
 
+    fs::create_directories(
+        fs::path(fmt::format(HOST_STATE_PERSIST_PATH, hostId)).parent_path());
+    fs::create_directories(BASE_FILE_DIR);
+
     // Add sdbusplus ObjectManager.
     sdbusplus::server::manager_t objManager(bus, objPathInst.c_str());
 
     phosphor::state::manager::Host manager(bus, objPathInst.c_str(), hostId);
-
-    auto dir = fs::path(fmt::format(HOST_STATE_PERSIST_PATH, hostId))
-                   .parent_path();
-    fs::create_directories(dir);
 
     // For backwards compatibility, request a busname without host id if
     // input id is 0.
